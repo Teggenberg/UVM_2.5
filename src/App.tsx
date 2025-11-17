@@ -141,16 +141,18 @@ function App() {
     const startTime = performance.now();
 
     try {
-      // Send previews (data URLs) plus filenames to the local proxy server which holds the API key
+      // Send previews (data URLs) plus filenames to the backend server which holds the API key
       const payload = {
         images: images.map((file, i) => ({ dataUrl: previews[i], filename: file.name })),
       };
 
-      const response = await axios.post('/api/analyze', payload);
+      // Use backend URL from environment or production domain
+      const apiUrl = ((import.meta as any).env.VITE_API_URL as string | undefined) || 'https://uvm-2-5.onrender.com/api/analyze';
+      const response = await axios.post(apiUrl, payload);
       const endTime = performance.now();
       const elapsed = Math.round(endTime - startTime);
       setResponseTime(elapsed);
-      console.log('Proxy /api/analyze response:', response.data, `(${elapsed}ms)`);
+      console.log('Backend /api/analyze response:', response.data, `(${elapsed}ms)`);
 
       // Server may return a single aggregated object under `analysis` or a legacy `analyses` array
       if (response.data?.analysis && typeof response.data.analysis === 'object') {
