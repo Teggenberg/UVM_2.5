@@ -7,10 +7,7 @@ dotenv.config();
 import express from 'express';
 import cors from 'cors';
 import axios from 'axios';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 4000;
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
@@ -29,10 +26,6 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
-
-// Serve static frontend files from the Vite dist folder
-const distPath = path.join(__dirname, '..', 'dist');
-app.use(express.static(distPath));
 
 // Simple health check for quick verification
 app.get('/health', (req, res) => {
@@ -222,18 +215,7 @@ Return ONLY this single JSON object.`,
   }
 });
 
-// Fallback: serve index.html for SPA routes (client-side routing)
-app.get('*', (req, res) => {
-  const indexPath = path.join(distPath, 'index.html');
-  res.sendFile(indexPath, (err) => {
-    if (err) {
-      console.error('Failed to serve index.html:', err);
-      res.status(404).json({ error: 'Not found' });
-    }
-  });
-});
-
 app.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT}`);
-  console.log(`Serving static files from: ${distPath}`);
+  console.log(`API server listening on http://localhost:${PORT}`);
+  console.log(`FRONTEND_URL: ${process.env.FRONTEND_URL || 'https://uvm-2-5-1.onrender.com'}`);
 });
