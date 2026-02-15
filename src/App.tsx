@@ -245,8 +245,27 @@ function App() {
         setAggregatedAnalysis(castAnalysis);
         setShowModal(true);
       } else {
+        // Build a best-effort fallback analysis so the UI can display useful info instead of failing
         console.error('Unexpected response shape from /api/analyze:', response.data);
-        alert('Unexpected response from analysis server. See console for details.');
+        const raw = response.data || {};
+        const src = raw.analysis || raw;
+        const fallback: AIProductIdentification = {
+          brand: src?.brand ?? (src?.aggregateSummary ?? 'Unknown'),
+          brandModel: src?.brandModel ?? (src?.brand_model ?? 'Unknown'),
+          finish: src?.finish ?? null,
+          musicalInstrumentCategory: src?.musicalInstrumentCategory ?? (src?.category ?? 'Unknown'),
+          condition: src?.condition ?? (src?.recommendation ?? 'Unknown'),
+          notedBlemishes: Array.isArray(src?.notedBlemishes) ? src.notedBlemishes : (src?.notedBlemishes ? [String(src.notedBlemishes)] : []),
+          metadataSummary: {
+            serialNumber: src?.metadataSummary?.serialNumber ?? src?.serialNumber ?? null,
+            colors: src?.metadataSummary?.colors ?? src?.colors ?? null,
+            materials: src?.metadataSummary?.materials ?? src?.materials ?? null,
+            estimatedValue: src?.metadataSummary?.estimatedValue ?? src?.estimatedValue ?? null,
+          },
+        };
+        setAggregatedAnalysis(fallback);
+        setShowModal(true);
+        console.warn('Displayed fallback analysis built from server response; check console for raw response', raw);
       }
     } catch (error: any) {
       // Prefer readable server error body when available
