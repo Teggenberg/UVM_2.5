@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
 
@@ -27,6 +27,90 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [initialPromptVisible, setInitialPromptVisible] = useState(true);
   const [initialInput, setInitialInput] = useState('');
+
+  // Capture / flow state for new camera workflow
+  const [mode, setMode] = useState<'landing' | 'capture' | 'app'>('landing');
+  const [category, setCategory] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [captureIndex, setCaptureIndex] = useState(0);
+  const captureSteps = [
+    'Full frontal (show whole instrument)',
+    'Headstock front',
+    'Headstock back',
+    'Full rear (back of body)',
+    'Close-up of front of body (bridge/pickups)'
+  ];
+  const [capturedPreviews, setCapturedPreviews] = useState<string[]>([]);
+
+  // Camera lifecycle and capture helpers (inside App so refs/state are available)
+  const startCamera = async () => {
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      streamRef.current = s;
+      if (videoRef.current) {
+        videoRef.current.srcObject = s;
+        await videoRef.current.play();
+      }
+    } catch (err) {
+      console.error('Camera start failed', err);
+      alert('Unable to access camera. You can still upload images from files.');
+    }
+  };
+
+  const stopCamera = () => {
+    try {
+      streamRef.current?.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+      if (videoRef.current) {
+        videoRef.current.pause();
+        // @ts-ignore
+        videoRef.current.srcObject = null;
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    if (mode === 'capture') startCamera();
+    return () => { if (mode !== 'capture') stopCamera(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  const capturePhoto = async () => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+    setCapturedPreviews(prev => {
+      const next = [...prev];
+      next[captureIndex] = dataUrl;
+      return next;
+    });
+    setCaptureIndex(i => Math.min(captureSteps.length - 1, i + 1));
+  };
+
+  const finishCaptureAndReview = async () => {
+    const files: File[] = [];
+    for (let i = 0; i < capturedPreviews.length; i++) {
+      const d = capturedPreviews[i];
+      if (!d) continue;
+      const res = await fetch(d);
+      const blob = await res.blob();
+      const file = new File([blob], `${category || 'item'}-capture-${i + 1}.jpg`, { type: blob.type });
+      files.push(file);
+    }
+    setImages(files);
+    setPreviews(capturedPreviews);
+    stopCamera();
+    setMode('app');
+  };
 
   // Compress image to 2MB or smaller if needed
   const compressImage = (file: File, maxSizeMB: number = 2): Promise<File> => {
@@ -99,7 +183,7 @@ function App() {
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
-    const remainingSlots = 4 - images.length;
+    const remainingSlots = 5 - images.length;
     const filesToAdd = files.slice(0, remainingSlots);
 
     // Compress files if needed and collect previews
@@ -145,9 +229,10 @@ function App() {
       const payload = {
         images: images.map((file, i) => ({ dataUrl: previews[i], filename: file.name })),
       };
+      console.log('Sending /api/analyze payload:', payload);
 
-      // Use backend URL from environment or production domain
-      const apiUrl = ((import.meta as any).env.VITE_API_URL as string | undefined) || 'https://uvm-2-5.onrender.com/api/analyze';
+      // Use backend URL from environment or fall back to relative path so Vite proxy works in dev
+      const apiUrl = ((import.meta as any).env.VITE_API_URL as string | undefined) || '/api/analyze';
       const response = await axios.post(apiUrl, payload);
       const endTime = performance.now();
       const elapsed = Math.round(endTime - startTime);
@@ -164,8 +249,10 @@ function App() {
         alert('Unexpected response from analysis server. See console for details.');
       }
     } catch (error: any) {
-      const errorMessage = error.response?.data?.error?.message || error.message;
-      alert(`Error analyzing images: ${errorMessage}`);
+      // Prefer readable server error body when available
+      const serverData = error.response?.data;
+      const errorMessage = serverData?.error?.message || serverData?.error || serverData || error.message;
+      alert(`Error analyzing images: ${JSON.stringify(errorMessage)}`);
       console.error('Analysis error:', error);
     } finally {
       setLoading(false);
@@ -188,6 +275,42 @@ function App() {
   return (
     <>
       <div className={`container ${initialPromptVisible ? 'blurred' : ''}`}>
+      
+
+      {mode === 'capture' && (
+        <div>
+          <h2 style={{ textAlign: 'center' }}>Capture photos — {category}</h2>
+          <div className="camera-container">
+            <video ref={videoRef} className="camera-video" playsInline muted />
+            <div className="camera-overlay">
+              <div className="overlay-step">Step {Math.min(captureIndex + 1, captureSteps.length)} / {captureSteps.length}</div>
+              <div className="overlay-instruction">{captureSteps[captureIndex] || captureSteps[captureSteps.length - 1]}</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 12 }}>
+            <button className="btn btn-primary" onClick={capturePhoto}>Capture</button>
+            <button className="btn btn-secondary" onClick={() => { stopCamera(); setMode('landing'); }}>Cancel</button>
+            <button className="btn" onClick={() => { setCapturedPreviews([]); setCaptureIndex(0); }}>Reset</button>
+            <button className="btn btn-primary" onClick={finishCaptureAndReview} disabled={capturedPreviews.filter(Boolean).length < captureSteps.length}>Use These Photos</button>
+          </div>
+          <div style={{ marginTop: 18 }}>
+            <div className="preview-grid">
+              {Array.from({ length: captureSteps.length }).map((_, i) => (
+                <div key={i} className="preview-card">
+                  {capturedPreviews[i] ? <img src={capturedPreviews[i]} alt={`capture-${i}`} /> : <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>No photo</div>}
+                  <div style={{ padding: 8 }}>
+                    <div style={{ fontSize: 12, color: '#666' }}>{captureSteps[i]}</div>
+                    <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                      <button className="btn btn-primary" onClick={async () => { setCaptureIndex(i); await startCamera(); }}>Retake</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="header">
         <h1>U V M</h1>
         <h3>[ PROTOTYPE ]</h3>
@@ -203,7 +326,7 @@ function App() {
             multiple
             accept="image/*"
             onChange={handleFileSelect}
-            disabled={images.length >= 4}
+            disabled={images.length >= 5}
             className="file-input"
             id="file-input"
           />
@@ -212,10 +335,25 @@ function App() {
               <path fill="currentColor" d="M20 5h-3.2l-1.8-2.4A1 1 0 0 0 14.6 2H9.4a1 1 0 0 0-.4.6L7.2 5H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm-8 13a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-2.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z" />
             </svg>
             <span>Click to select images</span>
-            <span className="upload-hint">({images.length}/4 images selected)</span>
+            <span className="upload-hint">({images.length}/5 images selected)</span>
           </label>
         </div>
       </div>
+
+      {/* Category selector moved below upload area for mobile-first UX */}
+      {mode === 'landing' && (
+        <div style={{ textAlign: 'center', padding: '18px 0' }}>
+          <h3 style={{ margin: '6px 0' }}>Select Instrument Category</h3>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+            {['Guitar','Pedal','Amp','Keyboard','Other'].map(cat => (
+              <button key={cat} className="btn btn-primary" onClick={() => { setCategory(cat); setMode('capture'); }} style={{ minWidth: 110 }}>
+                {cat}
+              </button>
+            ))}
+          </div>
+          <p style={{ marginTop: 12, color: '#666', fontSize: 13 }}>You'll be guided to capture 5 photos for the selected category.</p>
+        </div>
+      )}
 
       {images.length > 0 && (
         <div className="preview-grid">

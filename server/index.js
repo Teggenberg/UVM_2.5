@@ -11,20 +11,47 @@ import axios from 'axios';
 const app = express();
 const PORT = process.env.PORT || 4000;
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 if (!OPENAI_KEY) {
   console.warn('Warning: OPENAI_API_KEY is not set. Create a .env file with OPENAI_API_KEY=sk-...');
 }
 
-// Configure CORS to accept requests from the frontend domain
+// Configure CORS to accept requests from the frontend domain (default to localhost for dev)
+const allowedOrigins = new Set([
+  FRONTEND_URL,
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'https://uvm-2-5-1.onrender.com',
+  'https://uvm-2-5.onrender.com',
+]);
+
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || 'https://uvm-2-5-1.onrender.com',
+  origin: function (origin, callback) {
+    // allow requests with no origin (mobile apps, curl, same-origin)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.has(origin)) {
+      return callback(null, true);
+    }
+    console.warn('CORS blocked origin:', origin);
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
-app.use(cors(corsOptions));
+app.use((req, res, next) => {
+  // attach CORS middleware and handle errors gracefully
+  cors(corsOptions)(req, res, (err) => {
+    if (err) {
+      console.warn('CORS error for request from', req.headers.origin, err.message);
+      res.status(403).json({ error: 'CORS error', message: err.message });
+      return;
+    }
+    next();
+  });
+});
 app.use(express.json({ limit: '50mb' }));
 
 // Simple health check for quick verification
@@ -95,14 +122,14 @@ Return ONLY this single JSON object.`,
       response = await axios.post(
         'https://api.openai.com/v1/chat/completions',
         {
-          model: 'gpt-4.1-mini', // Use appropriate vision-capable model
+          model: 'o4-mini', // Use appropriate vision-capable model
           messages: [
             {
               role: 'user',
               content: messageContent,
             },
           ],
-          max_tokens: 4096,
+          max_completion_tokens: 4096,
         },
         {
           headers: {
@@ -162,7 +189,7 @@ Return ONLY this single JSON object.`,
           {
             model: 'gpt-4-vision-preview',
             messages: formatterMessages,
-            max_tokens: 2000,
+            max_completion_tokens: 2000,
           },
           {
             headers: {
@@ -217,5 +244,5 @@ Return ONLY this single JSON object.`,
 
 app.listen(PORT, () => {
   console.log(`API server listening on http://localhost:${PORT}`);
-  console.log(`FRONTEND_URL: ${process.env.FRONTEND_URL || 'https://uvm-2-5-1.onrender.com'}`);
+  console.log(`FRONTEND_URL: ${FRONTEND_URL}`);
 });
