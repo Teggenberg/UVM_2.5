@@ -214,21 +214,21 @@ Return ONLY this single JSON object.`,
               parsedObj = candidate;
             } else {
               console.error('Formatter returned non-object:', candidate);
-              return res.status(500).json({ error: 'Formatter did not return a JSON object' });
+              parsedObj = { rawFormatterContent: fmtContent, note: 'formatter_returned_non_object' };
             }
           } catch (fparseErr) {
             console.error('Failed to parse JSON from formatter response:', fparseErr, { fmtContent });
-            return res.status(500).json({ error: 'Failed to parse JSON from formatter response', details: String(fparseErr) });
+            parsedObj = { rawFormatterContent: fmtContent, parseError: String(fparseErr), note: 'formatter_parse_failed' };
           }
         } else {
           console.error('Formatter did not return a JSON object (no braces):', fmtContent);
-          return res.status(500).json({ error: 'Formatter did not return a JSON object', raw: fmtContent });
+          parsedObj = { rawFormatterContent: fmtContent, note: 'formatter_no_braces' };
         }
       } catch (fmtErr) {
         console.error('Formatter request failed:', fmtErr?.response?.data || fmtErr.message || fmtErr);
         const status = fmtErr?.response?.status || 500;
         const data = fmtErr?.response?.data || { error: fmtErr.message || 'Formatter request failed' };
-        return res.status(status).json({ error: 'Formatter request failed', details: data });
+        parsedObj = { error: 'formatter_request_failed', details: data, note: 'formatter_request_failed' };
       }
     }
 
