@@ -233,6 +233,11 @@ Return ONLY this single JSON object.`,
     }
 
     // Return a single aggregated analysis object
+    try {
+      console.log('Responding /api/analyze with analysis:', JSON.stringify(parsedObj).substring(0, 2000));
+    } catch (e) {
+      console.log('Responding /api/analyze (could not stringify parsedObj)');
+    }
     return res.json({ analysis: parsedObj });
   } catch (err) {
     console.error('Server error while proxying to OpenAI:', err?.response?.data || err.message || err);
