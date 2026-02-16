@@ -110,6 +110,7 @@ function App() {
     setPreviews(capturedPreviews);
     stopCamera();
     setMode('app');
+    return { files, previews: capturedPreviews };
   };
 
   // Compress image to 2MB or smaller if needed
@@ -212,8 +213,10 @@ function App() {
     setPreviews(prev => prev.filter((_, i) => i !== index));
   };
 
-  const analyzeImages = async () => {
-    if (images.length === 0) {
+  const analyzeImages = async (imagesArg?: File[], previewsArg?: string[]) => {
+    const useImages = imagesArg ?? images;
+    const usePreviews = previewsArg ?? previews;
+    if (!useImages || useImages.length === 0) {
       alert('Please upload at least one image');
       return;
     }
@@ -227,7 +230,7 @@ function App() {
     try {
       // Send previews (data URLs) plus filenames to the backend server which holds the API key
       const payload = {
-        images: images.map((file, i) => ({ dataUrl: previews[i], filename: file.name })),
+        images: useImages.map((file, i) => ({ dataUrl: usePreviews[i], filename: file.name })),
       };
       console.log('Sending /api/analyze payload:', payload);
 
@@ -301,16 +304,32 @@ function App() {
           <h2 style={{ textAlign: 'center' }}>Capture photos — {category}</h2>
           <div className="camera-container">
             <video ref={videoRef} className="camera-video" playsInline muted />
+            <button
+              className="camera-cancel-btn"
+              aria-label="Close camera"
+              onClick={() => { stopCamera(); setMode('landing'); }}
+            >
+              ✕
+            </button>
             <div className="camera-overlay">
               <div className="overlay-step">Step {Math.min(captureIndex + 1, captureSteps.length)} / {captureSteps.length}</div>
               <div className="overlay-instruction">{captureSteps[captureIndex] || captureSteps[captureSteps.length - 1]}</div>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 12 }}>
-            <button className="btn btn-primary" onClick={capturePhoto}>Capture</button>
-            <button className="btn btn-secondary" onClick={() => { stopCamera(); setMode('landing'); }}>Cancel</button>
+          <div className="capture-controls">
             <button className="btn" onClick={() => { setCapturedPreviews([]); setCaptureIndex(0); }}>Reset</button>
-            <button className="btn btn-primary" onClick={finishCaptureAndReview} disabled={capturedPreviews.filter(Boolean).length < captureSteps.length}>Use These Photos</button>
+            <button className="capture-btn" onClick={capturePhoto} aria-label="Take photo">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 8.5C9.515 8.5 7.5 10.515 7.5 13C7.5 15.485 9.515 17.5 12 17.5C14.485 17.5 16.5 15.485 16.5 13C16.5 10.515 14.485 8.5 12 8.5Z" stroke="white" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M20 7H16.8L15.4 5H8.6L7.2 7H4" stroke="white" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                <circle cx="12" cy="13" r="3" fill="white" opacity="0.15"/>
+              </svg>
+            </button>
+            <button className="btn btn-primary" onClick={async () => {
+              if (capturedPreviews.filter(Boolean).length < captureSteps.length) return;
+              const result = await finishCaptureAndReview();
+              await analyzeImages(result?.files, result?.previews);
+            }} disabled={capturedPreviews.filter(Boolean).length < captureSteps.length}>Generate</button>
           </div>
           <div style={{ marginTop: 18 }}>
             <div className="preview-grid">
@@ -359,20 +378,24 @@ function App() {
         </div>
       </div>
 
-      {/* Category selector moved below upload area for mobile-first UX */}
-      {mode === 'landing' && (
-        <div style={{ textAlign: 'center', padding: '18px 0' }}>
-          <h3 style={{ margin: '6px 0' }}>Select Instrument Category</h3>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 10, flexWrap: 'wrap' }}>
-            {['Guitar','Pedal','Amp','Keyboard','Other'].map(cat => (
-              <button key={cat} className="btn btn-primary" onClick={() => { setCategory(cat); setMode('capture'); }} style={{ minWidth: 110 }}>
-                {cat}
-              </button>
-            ))}
-          </div>
-          <p style={{ marginTop: 12, color: '#666', fontSize: 13 }}>You'll be guided to capture 5 photos for the selected category.</p>
+      {/* Category selector moved below upload area for mobile-first UX; render always so users can change category after capture */}
+      <div style={{ textAlign: 'center', padding: '18px 0' }}>
+        <h3 style={{ margin: '6px 0' }}>Select Instrument Category</h3>
+        <div className="category-row">
+          {['Guitar','Pedal','Amp','Other'].map(cat => (
+            <button
+              key={cat}
+              className={`btn ${category === cat ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => { setCategory(cat); setMode('capture'); }}
+            >
+              {cat}
+            </button>
+          ))}
         </div>
-      )}
+        {mode === 'landing' && (
+          <p style={{ marginTop: 12, color: '#666', fontSize: 13 }}>You'll be guided to capture 5 photos for the selected category.</p>
+        )}
+      </div>
 
       {images.length > 0 && (
         <div className="preview-grid">
@@ -395,7 +418,7 @@ function App() {
       {images.length > 0 && (
         <div className="action-buttons">
           <button
-            onClick={analyzeImages}
+            onClick={() => analyzeImages()}
             disabled={loading || images.length === 0}
             className="btn btn-primary"
           >
