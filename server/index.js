@@ -59,6 +59,20 @@ app.get('/health', (req, res) => {
   res.json({ ok: true, envHasKey: !!OPENAI_KEY });
 });
 
+// Debug endpoint to inspect incoming requests from production frontend
+app.post('/api/debug', (req, res) => {
+  try {
+    const origin = req.headers.origin || null;
+    const len = JSON.stringify(req.body || '').length;
+    console.log(`/api/debug received from origin=${origin} bodyLength=${len} headers=${JSON.stringify(req.headers).substring(0,2000)}`);
+    const bodyPreview = JSON.stringify(req.body).substring(0, 2000);
+    res.json({ ok: true, origin, bodyPreview, headers: { host: req.headers.host, origin: req.headers.origin, referer: req.headers.referer } });
+  } catch (e) {
+    console.warn('Debug endpoint error', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 app.post('/api/analyze', async (req, res) => {
   try {
     const images = req.body.images;
@@ -66,11 +80,40 @@ app.post('/api/analyze', async (req, res) => {
       return res.status(400).json({ error: 'Request must include an "images" array of objects with { dataUrl, filename }' });
     }
 
-    // Build message content with all images (each image expected as { dataUrl, filename })
-    const messageContent = images.map((img) => ({
-      type: 'image_url',
-      image_url: { url: img.dataUrl || img.data_url || img },
-    }));
+    // Inspect and validate incoming images before calling OpenAI
+    const messageContent = [];
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      const dataUrl = img.dataUrl || img.data_url || img;
+      try {
+        const preview = String(dataUrl).slice(0, 120);
+        const len = String(dataUrl).length;
+        console.log(`Image[${i}] filename=${img.filename || 'unknown'} length=${len} preview=${preview}`);
+      } catch (e) {
+        console.warn('Failed to log image preview', e);
+      }
+
+      // Basic data URL validation: must be a data:image/*;base64,...
+      if (typeof dataUrl !== 'string' || !/^data:image\/(png|jpeg|jpg|gif);base64,/.test(dataUrl)) {
+        console.warn(`Invalid image data URL at index ${i}`);
+        return res.status(400).json({ error: 'invalid_image', detail: `image[${i}] has an invalid or missing dataUrl (expect data:image/*;base64,...)` });
+      }
+
+      // Verify base64 decodes
+      try {
+        const base64 = dataUrl.split(',')[1] || '';
+        const buf = Buffer.from(base64, 'base64');
+        if (buf.length === 0) {
+          console.warn(`Decoded image[${i}] has zero length`);
+          return res.status(400).json({ error: 'invalid_image', detail: `image[${i}] base64 decodes to zero length` });
+        }
+      } catch (decodeErr) {
+        console.warn(`Failed to decode base64 for image[${i}]`, decodeErr?.message || decodeErr);
+        return res.status(400).json({ error: 'invalid_image', detail: `image[${i}] base64 decode failed: ${String(decodeErr)}` });
+      }
+
+      messageContent.push({ type: 'image_url', image_url: { url: dataUrl } });
+    }
 
     // Provide a strict JSON-first instruction requesting a single aggregated analysis object
     const filenamesList = images.map((i, idx) => i.filename ?? `image-${idx + 1}`).join(', ');
